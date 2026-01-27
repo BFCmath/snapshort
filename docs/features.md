@@ -33,14 +33,25 @@ if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
 
 Providing a globally accessible trigger from the Android status bar.
 
-- **Implementation**: `TileService`
+- **Implementation**: `TileService` + `AccessibilityService`
 - **State Management**: Tile shows `STATE_ACTIVE` when accessibility service is enabled
-- **Trigger Method**: Direct static call to `ScreenshotAccessibilityService.takeScreenshot()`
+- **Trigger**: `TileService` → `AccessibilityService.takeScreenshot()`
 
-### Notification Shade Collapse
-- **Android 14+**: Uses `collapseShade()` (TileService method)
-- **Legacy**: Sends `Intent.ACTION_CLOSE_SYSTEM_DIALOGS`
-- **Timing**: 300ms delay after collapse before capture
+### Panel Dismiss Before Capture
+
+| Android Version | Method | API |
+|-----------------|--------|-----|
+| **12+ (API 31)** | `GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE` | Official Accessibility API |
+| **11 (API 30)** | Timing-based (400ms delay) | N/A |
+
+```kotlin
+if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+    performGlobalAction(GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE)
+}
+handler.postDelayed({ performScreenshot() }, 400L)
+```
+
+This ensures the captured screenshot shows the underlying app, not the Quick Settings panel.
 
 ---
 

@@ -1,7 +1,6 @@
 package com.example.snapshort.service
 
 import android.accessibilityservice.AccessibilityService
-import android.accessibilityservice.AccessibilityServiceInfo
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -22,12 +21,20 @@ class ScreenshotAccessibilityService : AccessibilityService() {
         private const val TAG = "ScreenshotAccessibility"
         const val ACTION_TAKE_SCREENSHOT = "com.example.snapshort.ACTION_TAKE_SCREENSHOT"
         
+        // Delay to allow notification shade to close before capture
+        private const val SHADE_DISMISS_DELAY_MS = 400L
+        
         private var instance: ScreenshotAccessibilityService? = null
         
         fun isServiceEnabled(): Boolean = instance != null
         
+        /**
+         * Take a screenshot after dismissing the notification shade.
+         * This ensures the captured image shows the underlying app content,
+         * not the Quick Settings panel.
+         */
         fun takeScreenshot() {
-            instance?.performScreenshot()
+            instance?.dismissAndCapture()
         }
     }
 
@@ -37,7 +44,7 @@ class ScreenshotAccessibilityService : AccessibilityService() {
     private val screenshotReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action == ACTION_TAKE_SCREENSHOT) {
-                performScreenshot()
+                dismissAndCapture()
             }
         }
     }
@@ -79,6 +86,28 @@ class ScreenshotAccessibilityService : AccessibilityService() {
             Log.e(TAG, "Error unregistering receiver", e)
         }
         Log.d(TAG, "Accessibility Service destroyed")
+    }
+
+    /**
+     * Dismiss the notification shade first, then capture after a delay.
+     * Uses GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE on Android 12+.
+     */
+    private fun dismissAndCapture() {
+        Log.d(TAG, "Dismissing notification shade before capture...")
+        
+        // Dismiss notification shade using the proper accessibility action
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            // Android 12+ (API 31) - Use official global action
+            val dismissed = performGlobalAction(GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE)
+            Log.d(TAG, "GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE result: $dismissed")
+        }
+        // Note: For Android 11 (API 30), the shade will already be collapsed 
+        // by the time our callback runs since takeScreenshot() is async
+        
+        // Wait for shade to animate closed, then capture
+        handler.postDelayed({
+            performScreenshot()
+        }, SHADE_DISMISS_DELAY_MS)
     }
 
     private fun performScreenshot() {

@@ -15,12 +15,16 @@ sequenceDiagram
     participant User
     participant Tile as ScreenshotTileService
     participant Acc as ScreenshotAccessibilityService
+    participant System as Android System
     participant Repo as ScreenshotRepository
 
     User->>Tile: Clicks Quick Settings Tile
-    Tile->>Acc: takeScreenshot() (direct call)
-    Acc->>Acc: AccessibilityService.takeScreenshot(Display.DEFAULT_DISPLAY)
-    Acc-->>Acc: Receives Bitmap via TakeScreenshotCallback
+    Tile->>Acc: takeScreenshot()
+    Acc->>System: GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE
+    System-->>Acc: Panel closes
+    Note over Acc: Wait 400ms for animation
+    Acc->>System: takeScreenshot(Display.DEFAULT_DISPLAY)
+    System-->>Acc: Returns HardwareBuffer
     Acc->>Repo: saveScreenshot(Bitmap)
     Repo-->>Acc: Returns saved File
     Acc->>User: Shows "Screenshot saved!" Toast
@@ -34,17 +38,17 @@ sequenceDiagram
 ### 1. [ScreenshotTileService](file:///d:/project/android/snapshort/app/src/main/java/com/example/snapshort/service/ScreenshotTileService.kt)
 - **Role**: Entry point for the user via the Notification Shade.
 - **Functionality**:
-    - **State Management**: Uses `qsTile.state` (`STATE_ACTIVE` or `STATE_INACTIVE`) depending on whether `ScreenshotAccessibilityService.isServiceEnabled()` returns true.
-    - **Active Tile Optimization**: Uses `ACTIVE_TILE` meta-data in manifest for efficient binding.
-    - **Capture Trigger**: Calls `ScreenshotAccessibilityService.takeScreenshot()` directly via static companion method.
+    - **State Management**: Uses `qsTile.state` (`STATE_ACTIVE` or `STATE_INACTIVE`) based on accessibility service status.
+    - **Lightweight Trigger**: Simply calls `ScreenshotAccessibilityService.takeScreenshot()` - all logic is centralized in the accessibility service.
 
 ### 2. [ScreenshotAccessibilityService](file:///d:/project/android/snapshort/app/src/main/java/com/example/snapshort/service/ScreenshotAccessibilityService.kt)
 - **Role**: Privileged system interaction service.
 - **Functionality**:
-    - **Permission Check**: Maintains a static `instance` and `isServiceEnabled()` flag.
-    - **Capture Logic (Android 11+)**: Uses `takeScreenshot(Display.DEFAULT_DISPLAY, executor, callback)` API which returns a `HardwareBuffer` containing the bitmap.
-    - **Bitmap Processing**: Converts `HardwareBuffer` → `Bitmap` → saves to internal storage via `ScreenshotRepository`.
-    - **Fallback (Android 9-10)**: Uses `performGlobalAction(GLOBAL_ACTION_TAKE_SCREENSHOT)` which saves to the system's public folder.
+    - **Panel Dismissal**: Uses `GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE` (API 31+) to close Quick Settings before capture.
+    - **Timed Capture**: Waits 400ms for panel animation before taking screenshot.
+    - **Capture Logic (Android 11+)**: Uses `takeScreenshot()` API for direct bitmap capture.
+    - **Bitmap Processing**: Converts `HardwareBuffer` → `Bitmap` → saves to internal storage.
+    - **Fallback (Android 9-10)**: Uses `performGlobalAction(GLOBAL_ACTION_TAKE_SCREENSHOT)`.
 
 ### 3. [ScreenshotRepository](file:///d:/project/android/snapshort/app/src/main/java/com/example/snapshort/data/ScreenshotRepository.kt)
 - **Role**: Data Access Layer and local storage manager.

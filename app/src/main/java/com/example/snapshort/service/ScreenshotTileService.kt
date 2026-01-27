@@ -1,13 +1,12 @@
 package com.example.snapshort.service
 
-import android.content.ComponentName
+import android.app.AlertDialog
 import android.content.Intent
-import android.graphics.drawable.Icon
 import android.os.Build
+import android.provider.Settings
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
 import android.util.Log
-import com.example.snapshort.R
 
 class ScreenshotTileService : TileService() {
 
@@ -26,50 +25,23 @@ class ScreenshotTileService : TileService() {
         Log.d(TAG, "Tile clicked")
         
         if (!ScreenshotAccessibilityService.isServiceEnabled()) {
-            // Service not enabled, show toast and don't proceed
             Log.w(TAG, "Accessibility service not enabled")
             showDialog(createAccessibilityDialog())
             return
         }
 
-        // Collapse the quick settings panel before taking screenshot
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            // Android 14+ way
-            collapseShade()
-        } else {
-            // Legacy way - send a broadcast
-            sendBroadcast(Intent(Intent.ACTION_CLOSE_SYSTEM_DIALOGS))
-        }
-
-        // Small delay to allow panel to collapse
-        android.os.Handler(mainLooper).postDelayed({
-            triggerScreenshot()
-        }, 300)
-    }
-
-    private fun collapseShade() {
-        try {
-            val statusBarService = getSystemService("statusbar")
-            val statusBarManager = Class.forName("android.app.StatusBarManager")
-            val collapse = statusBarManager.getMethod("collapsePanels")
-            collapse.invoke(statusBarService)
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to collapse shade", e)
-        }
-    }
-
-    private fun triggerScreenshot() {
-        // Direct call to the accessibility service
+        // Trigger screenshot - the AccessibilityService handles dismissing 
+        // the notification shade before capturing
         ScreenshotAccessibilityService.takeScreenshot()
         Log.d(TAG, "Screenshot triggered")
     }
 
-    private fun createAccessibilityDialog(): android.app.AlertDialog {
-        return android.app.AlertDialog.Builder(this)
+    private fun createAccessibilityDialog(): AlertDialog {
+        return AlertDialog.Builder(this)
             .setTitle("Enable Accessibility")
             .setMessage("Please enable SnapShort accessibility service to take screenshots.")
             .setPositiveButton("Open Settings") { _, _ ->
-                val intent = Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
                 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 startActivity(intent)
             }
