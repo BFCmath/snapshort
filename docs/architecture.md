@@ -15,18 +15,19 @@ sequenceDiagram
     participant User
     participant Tile as ScreenshotTileService
     participant Acc as ScreenshotAccessibilityService
-    participant System as Android System
     participant Repo as ScreenshotRepository
 
     User->>Tile: Clicks Quick Settings Tile
-    Tile->>Acc: Triggers Screenshot (Method or Broadcast)
-    Acc->>System: performGlobalAction(GLOBAL_ACTION_TAKE_SCREENSHOT)
-    System-->>Acc: Captures & Saves to /Pictures/Screenshots
-    Acc->>Acc: FileObserver detects new file
-    Acc->>Repo: copyScreenshotToInternal(newFile)
-    Repo-->>Acc: Success
-    Acc->>User: Shows "Screenshot taken!" Toast
+    Tile->>Acc: takeScreenshot() (direct call)
+    Acc->>Acc: AccessibilityService.takeScreenshot(Display.DEFAULT_DISPLAY)
+    Acc-->>Acc: Receives Bitmap via TakeScreenshotCallback
+    Acc->>Repo: saveScreenshot(Bitmap)
+    Repo-->>Acc: Returns saved File
+    Acc->>User: Shows "Screenshot saved!" Toast
 ```
+
+> [!NOTE]  
+> On Android 11+ (API 30), we use `AccessibilityService.takeScreenshot()` which returns a bitmap directly. On Android 9-10, we fall back to `performGlobalAction(GLOBAL_ACTION_TAKE_SCREENSHOT)`.
 
 ## Core Components
 
@@ -34,39 +35,40 @@ sequenceDiagram
 - **Role**: Entry point for the user via the Notification Shade.
 - **Functionality**:
     - **State Management**: Uses `qsTile.state` (`STATE_ACTIVE` or `STATE_INACTIVE`) depending on whether `ScreenshotAccessibilityService.isServiceEnabled()` returns true.
-    - **Active Tile Optimization**: Uses `ACTIVE_TILE` meta-data in manifest to allow the system to bind it more efficiently.
-    - **Capture Trigger**: 
-        1. Calls `collapseShade()` (using reflection on `StatusBarManager` or `collapsePanels` for newer APIs).
-        2. Dispatches capture request via `ScreenshotAccessibilityService.takeScreenshot()` (direct instance call) AND a backup broadcast `com.example.snapshort.ACTION_TAKE_SCREENSHOT`.
+    - **Active Tile Optimization**: Uses `ACTIVE_TILE` meta-data in manifest for efficient binding.
+    - **Capture Trigger**: Calls `ScreenshotAccessibilityService.takeScreenshot()` directly via static companion method.
 
 ### 2. [ScreenshotAccessibilityService](file:///d:/project/android/snapshort/app/src/main/java/com/example/snapshort/service/ScreenshotAccessibilityService.kt)
 - **Role**: Privileged system interaction service.
 - **Functionality**:
-    - **Permission Check**: Maintains a static `instance` and `isServiceEnabled()` flag for other components to check readiness.
-    - **Capture Logic**: Executes `performGlobalAction(GLOBAL_ACTION_TAKE_SCREENSHOT)`. This is preferred over `MediaProjection` as it avoids the "Start Recording" system dialog but requires Android 9 (Pie) or higher.
-    - **File Discovery**: Uses `FileObserver` with `CREATE` or `CLOSE_WRITE` event masks. It watches both standard `/Pictures/Screenshots` and alternative `/DCIM/Screenshots` paths.
-    - **Race Condition Handling**: Implements a `1000ms` delay before copying to ensure the system has finished flushing the captured image to disk.
+    - **Permission Check**: Maintains a static `instance` and `isServiceEnabled()` flag.
+    - **Capture Logic (Android 11+)**: Uses `takeScreenshot(Display.DEFAULT_DISPLAY, executor, callback)` API which returns a `HardwareBuffer` containing the bitmap.
+    - **Bitmap Processing**: Converts `HardwareBuffer` → `Bitmap` → saves to internal storage via `ScreenshotRepository`.
+    - **Fallback (Android 9-10)**: Uses `performGlobalAction(GLOBAL_ACTION_TAKE_SCREENSHOT)` which saves to the system's public folder.
 
 ### 3. [ScreenshotRepository](file:///d:/project/android/snapshort/app/src/main/java/com/example/snapshort/data/ScreenshotRepository.kt)
 - **Role**: Data Access Layer and local storage manager.
 - **Functionality**:
+    - **Direct Save**: `saveScreenshot(Bitmap)` compresses and saves PNG to internal storage.
     - **Internal Scoping**: Uses `context.filesDir` to keep data private.
-    - **Concurrency**: Implements `loadBitmap` with `Dispatchers.IO` to avoid blocking the main thread during image decoding.
-    - **Naming Convention**: Files are saved as `screenshot_{timestamp}.png` to maintain uniqueness without complex database indexing.
+    - **Concurrency**: Implements `loadBitmap` with `Dispatchers.IO`.
+    - **Naming Convention**: Files use `screenshot_{timestamp}.png` format.
 
 ### 4. [MainActivity](file:///d:/project/android/snapshort/app/src/main/java/com/example/snapshort/MainActivity.kt) & [GalleryScreen](file:///d:/project/android/snapshort/app/src/main/java/com/example/snapshort/ui/GalleryScreen.kt)
 - **Role**: Presentation and management interface.
 - **Functionality**:
-    - **Lifecycle Awareness**: Uses `Lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED)` in `MainActivity` to refresh the screenshot list and permission status automatically when the user returns to the app.
-    - **Modern UI Stack**: Built with Jetpack Compose, Material 3, and Coil for image loading.
-    - **Gesture Engine**: `GalleryScreen` implements a custom `pointerInput` with `detectTransformGestures` for pinch-to-zoom (0.5x to 5x range) and panning in the full-screen viewer.
+    - **Lifecycle Awareness**: Uses `Lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED)` to refresh automatically.
+    - **Modern UI Stack**: Built with Jetpack Compose, Material 3, and Coil.
+    - **Gesture Engine**: Pinch-to-zoom (0.5x to 5x) and panning in full-screen viewer.
 
-## Data Flow & Synchronization
+## Data Flow
 
-Snapshort uses a "Pull-then-Sync" model:
-1. The **System** captures the image and saves it to a public directory (e.g., `/Pictures/Screenshots`).
-2. The **Accessibility Service**'s `FileObserver` detects this event.
-3. The **Repository** copies the file to **Internal Storage**.
-4. The **UI** (MainActivity) refreshes its local list from the internal storage via the repository.
+Snapshort uses a **Direct Capture** model on Android 11+:
 
-This ensures that Snapshort has its own private gallery that remains consistent even if the user deletes images from the public gallery (or vice versa).
+1. User taps the Quick Settings tile
+2. `TileService` calls `AccessibilityService.takeScreenshot()`
+3. System returns `HardwareBuffer` → converted to `Bitmap`
+4. `Repository` saves bitmap to **internal storage** directly
+5. **No external storage access required** - images never touch public folders
+
+This ensures complete privacy - screenshots are stored only in the app's private directory.

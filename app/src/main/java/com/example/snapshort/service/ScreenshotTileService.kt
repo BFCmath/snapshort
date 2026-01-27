@@ -59,14 +59,8 @@ class ScreenshotTileService : TileService() {
     }
 
     private fun triggerScreenshot() {
-        // Method 1: Direct call if service is running
+        // Direct call to the accessibility service
         ScreenshotAccessibilityService.takeScreenshot()
-        
-        // Method 2: Broadcast as backup
-        val intent = Intent(ScreenshotAccessibilityService.ACTION_TAKE_SCREENSHOT)
-        intent.setPackage(packageName)
-        sendBroadcast(intent)
-        
         Log.d(TAG, "Screenshot triggered")
     }
 
