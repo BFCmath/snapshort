@@ -13,7 +13,14 @@ import android.util.Log
 import android.view.Display
 import android.view.accessibility.AccessibilityEvent
 import android.widget.Toast
+import android.net.Uri
 import com.example.snapshort.data.ScreenshotRepository
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.cancel
 
 class ScreenshotAccessibilityService : AccessibilityService() {
 
@@ -22,7 +29,7 @@ class ScreenshotAccessibilityService : AccessibilityService() {
         const val ACTION_TAKE_SCREENSHOT = "com.example.snapshort.ACTION_TAKE_SCREENSHOT"
         
         // Delay to allow notification shade to close before capture
-        private const val SHADE_DISMISS_DELAY_MS = 400L
+        private const val SHADE_DISMISS_DELAY_MS = 450L
         
         private var instance: ScreenshotAccessibilityService? = null
         
@@ -40,6 +47,7 @@ class ScreenshotAccessibilityService : AccessibilityService() {
 
     private val handler = Handler(Looper.getMainLooper())
     private lateinit var repository: ScreenshotRepository
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     private val screenshotReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -85,6 +93,7 @@ class ScreenshotAccessibilityService : AccessibilityService() {
         } catch (e: Exception) {
             Log.e(TAG, "Error unregistering receiver", e)
         }
+        serviceScope.cancel()
         Log.d(TAG, "Accessibility Service destroyed")
     }
 
@@ -122,35 +131,79 @@ class ScreenshotAccessibilityService : AccessibilityService() {
                     override fun onSuccess(screenshot: ScreenshotResult) {
                         Log.d(TAG, "Screenshot captured successfully")
                         
-                        // Get the hardware bitmap and convert to software bitmap for saving
+                        // Get the hardware bitmap
                         val hardwareBitmap = Bitmap.wrapHardwareBuffer(
                             screenshot.hardwareBuffer,
                             screenshot.colorSpace
                         )
                         
                         if (hardwareBitmap != null) {
-                            // Convert to software bitmap for file operations
-                            val softwareBitmap = hardwareBitmap.copy(Bitmap.Config.ARGB_8888, false)
-                            hardwareBitmap.recycle()
-                            screenshot.hardwareBuffer.close()
-                            
-                            // Save to internal storage
-                            val savedFile = repository.saveScreenshot(softwareBitmap)
-                            softwareBitmap.recycle()
-                            
-                            handler.post {
-                                if (savedFile != null) {
-                                    Toast.makeText(
-                                        this@ScreenshotAccessibilityService,
-                                        "Screenshot saved!",
-                                        Toast.LENGTH_SHORT
-                                    ).show()
+                            // Launch background coroutine for saving
+                            serviceScope.launch(Dispatchers.IO) {
+                                try {
+                                    // Convert to software bitmap for file operations
+                                    // This copy operation can be heavy, so we do it in IO
+                                    val softwareBitmap = hardwareBitmap.copy(Bitmap.Config.ARGB_8888, false)
+                                    
+                                    // Make sure to close hardware resources
+                                    // Note: We can't recycle hardwareBitmap from this thread if it was created
+                                    // on another, but we can close the hardwareBuffer.
+                                    // Actually, wrapHardwareBuffer returns a Bitmap that manages the buffer.
+                                    // We should close the screenshot hardwareBuffer as per API.
+                                    // However, since we are inside onSuccess which provides the result, 
+                                    // let's do the copy then close everything safely.
+                                } catch (e: Exception) {
+                                    Log.e(TAG, "Error copying bitmap", e)
+                                    withContext(Dispatchers.Main) {
+                                         Toast.makeText(this@ScreenshotAccessibilityService, "Error processing screenshot", Toast.LENGTH_SHORT).show()
+                                    }
+                                    return@launch
+                                }
+                                
+                                // Actually, we need to handle the resources carefully. 
+                                // The hardwareBitmap wraps the buffer.
+                                // We should copy it, then close/recycle.
+                                // NOTE: copy() might need to run before we close the buffer.
+                                
+                                val softwareBitmap = try {
+                                    hardwareBitmap.copy(Bitmap.Config.ARGB_8888, false)
+                                } catch(e: Exception) { null }
+                                
+                                // Clean up hardware resources immediately
+                                hardwareBitmap.recycle()
+                                screenshot.hardwareBuffer.close()
+                                
+                                if (softwareBitmap != null) {
+                                    // Save to internal storage
+                                    val savedFile = repository.saveScreenshot(softwareBitmap)
+                                    softwareBitmap.recycle()
+                                    
+                                    withContext(Dispatchers.Main) {
+                                        if (savedFile != null) {
+                                            Toast.makeText(
+                                                this@ScreenshotAccessibilityService,
+                                                "Screenshot saved!",
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                            
+                                            // Launch Image Preview
+                                            val intent = Intent(this@ScreenshotAccessibilityService, com.example.snapshort.ui.PreviewActivity::class.java).apply {
+                                                putExtra("IMAGE_URI", Uri.fromFile(savedFile).toString())
+                                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                                            }
+                                            startActivity(intent)
+                                        } else {
+                                            Toast.makeText(
+                                                this@ScreenshotAccessibilityService,
+                                                "Failed to save screenshot",
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                        }
+                                    }
                                 } else {
-                                    Toast.makeText(
-                                        this@ScreenshotAccessibilityService,
-                                        "Failed to save screenshot",
-                                        Toast.LENGTH_SHORT
-                                    ).show()
+                                    withContext(Dispatchers.Main) {
+                                         Toast.makeText(this@ScreenshotAccessibilityService, "Failed to process image", Toast.LENGTH_SHORT).show()
+                                    }
                                 }
                             }
                         } else {

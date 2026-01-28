@@ -27,6 +27,19 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".ui.PreviewActivity"
+            android:theme="@style/Theme.Snapshort.Transparent"
+            android:excludeFromRecents="true"
+            android:launchMode="singleInstance"
+            android:taskAffinity="" />
+
+        <activity
+            android:name=".ui.EditScreenshotActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:taskAffinity="" />
+
         <!-- Quick Settings Tile Service -->
         <service
             android:name=".service.ScreenshotTileService"
