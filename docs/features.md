@@ -42,7 +42,7 @@ Providing a globally accessible trigger from the Android status bar.
 | Android Version | Method | API |
 |-----------------|--------|-----|
 | **12+ (API 31)** | `GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE` | Official Accessibility API |
-| **11 (API 30)** | Timing-based (400ms delay) | N/A |
+| **11 (API 30)** | Timing-based (450ms delay) | N/A |
 
 ```kotlin
 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -55,7 +55,20 @@ This ensures the captured screenshot shows the underlying app, not the Quick Set
 
 ---
 
-## 3. Private Screenshot Storage
+## 3. Instant Preview Overlay
+
+Immediately after capture, a floating preview appears.
+
+- **Design**: Edge-to-Edge transparent activity (no window insets/margins).
+- **Interaction**:
+    - **Auto-Dismiss**: Slides out after 2.5 seconds.
+    - **Swipe**: Manual dismiss gesture (drag left).
+    - **Edit**: Tapping opens the Editor.
+- **Implementation**: Jetpack Compose `Box` with `Animatable` offsets.
+
+---
+
+## 4. Private Screenshot Storage
 
 All screenshots on Android 11+ are saved directly to the app's private internal storage.
 

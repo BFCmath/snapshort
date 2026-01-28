@@ -22,7 +22,8 @@ sequenceDiagram
     Tile->>Acc: takeScreenshot()
     Acc->>System: GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE
     System-->>Acc: Panel closes
-    Note over Acc: Wait 400ms for animation
+    System-->>Acc: Panel closes
+    Note over Acc: Wait 450ms for animation
     Acc->>System: takeScreenshot(Display.DEFAULT_DISPLAY)
     System-->>Acc: Returns HardwareBuffer
     Acc->>Repo: saveScreenshot(Bitmap)
@@ -45,9 +46,11 @@ sequenceDiagram
 - **Role**: Privileged system interaction service.
 - **Functionality**:
     - **Panel Dismissal**: Uses `GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE` (API 31+) to close Quick Settings before capture.
-    - **Timed Capture**: Waits 400ms for panel animation before taking screenshot.
+    - **Panel Dismissal**: Uses `GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE` (API 31+) to close Quick Settings before capture.
+    - **Timed Capture**: Waits 450ms for panel animation before taking screenshot.
     - **Capture Logic (Android 11+)**: Uses `takeScreenshot()` API for direct bitmap capture.
     - **Bitmap Processing**: Converts `HardwareBuffer` → `Bitmap` → saves to internal storage.
+    - **Concurrency**: Operations offloaded to `Dispatchers.IO` to prevent UI stutter.
     - **Fallback (Android 9-10)**: Uses `performGlobalAction(GLOBAL_ACTION_TAKE_SCREENSHOT)`.
 
 ### 3. [ScreenshotRepository](file:///d:/project/android/snapshort/app/src/main/java/com/example/snapshort/data/ScreenshotRepository.kt)
@@ -57,8 +60,23 @@ sequenceDiagram
     - **Internal Scoping**: Uses `context.filesDir` to keep data private.
     - **Concurrency**: Implements `loadBitmap` with `Dispatchers.IO`.
     - **Naming Convention**: Files use `screenshot_{timestamp}.png` format.
+    
+### 4. [PreviewActivity](file:///d:/project/android/snapshort/app/src/main/java/com/example/snapshort/ui/PreviewActivity.kt)
+- **Role**: Immediate post-capture feedback.
+- **Functionality**:
+    - **Edge-to-Edge**: Full-screen transparent activity overlay.
+    - **Animations**: Auto-dismiss (slide left) after 2.5s, swipe-to-dismiss gesture.
+    - **Navigation**: Deep-links to `EditScreenshotActivity`.
 
-### 4. [MainActivity](file:///d:/project/android/snapshort/app/src/main/java/com/example/snapshort/MainActivity.kt) & [GalleryScreen](file:///d:/project/android/snapshort/app/src/main/java/com/example/snapshort/ui/GalleryScreen.kt)
+### 5. [EditScreenshotActivity](file:///d:/project/android/snapshort/app/src/main/java/com/example/snapshort/ui/EditScreenshotActivity.kt)
+- **Role**: Lightweight editor for cropping and metadata.
+- **Config**: `taskAffinity=""` and `excludeFromRecents="true"` to run as an isolated task.
+- **Functionality**:
+    - **Drag-to-Crop**: Custom touch handler for "Draw New" cropping interaction.
+    - **Frozen View**: Auto-zoom disabled for stable editing.
+    - **Metadata**: Saves task name and due date.
+
+### 6. [MainActivity](file:///d:/project/android/snapshort/app/src/main/java/com/example/snapshort/MainActivity.kt) & [GalleryScreen](file:///d:/project/android/snapshort/app/src/main/java/com/example/snapshort/ui/GalleryScreen.kt)
 - **Role**: Presentation and management interface.
 - **Functionality**:
     - **Lifecycle Awareness**: Uses `Lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED)` to refresh automatically.

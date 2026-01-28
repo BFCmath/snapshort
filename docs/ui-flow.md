@@ -16,13 +16,34 @@ If the Accessibility Service is not enabled:
 - Uses `LaunchedEffect` with `Lifecycle.State.RESUMED` to auto-check permission
 - "Open Settings" button deep-links to system Accessibility settings
 
-### 2. Gallery State
-Once enabled, displays the `GalleryScreen`:
+### 2. Preview State (Immediate)
+Appears as a floating overlay after capture:
+- **Auto-Dismiss**: Slides left after 2.5s inactivity
+- **Swipe**: Manual dismiss (swipe left)
+- **Tap**: Opens `EditScreenshotActivity`
+
+### 3. Gallery State
+Displays the `GalleryScreen`:
 - **Refresh**: `PullToRefreshBox` for manual updates
 - **Data Source**: `ScreenshotRepository.getScreenshots()` returns internal storage files
 - **Auto-refresh**: List updates on every `onResume`
 
 ## Components
+    
+### [PreviewActivity](file:///d:/project/android/snapshort/app/src/main/java/com/example/snapshort/ui/PreviewActivity.kt)
+
+| Feature | Implementation |
+|---------|----------------|
+| **Layout** | Transparent `Edge-to-Edge` Activity |
+| **Animation** | `Animatable` offset + `LaunchedEffect` timer (2.5s) |
+| **Gestures** | `detectHorizontalDragGestures` for swipe-to-dismiss |
+
+### [EditScreenshotActivity](file:///d:/project/android/snapshort/app/src/main/java/com/example/snapshort/ui/EditScreenshotActivity.kt)
+
+**Interaction Model: Create-Only**
+- **Image**: Static/Frozen (No zoom)
+- **Action**: "Drag-to-Crop" - dragging creates a *new* crop selection every time
+- **Task**: Isolated stack (`taskAffinity=""`) so it doesn't clutter Main app history
 
 ### [GalleryScreen](file:///d:/project/android/snapshort/app/src/main/java/com/example/snapshort/ui/GalleryScreen.kt)
 
@@ -74,10 +95,14 @@ Modifier
 stateDiagram-v2
     [*] --> CheckPermission
     CheckPermission --> Onboarding: Service Disabled
-    CheckPermission --> Gallery: Service Enabled
-    Onboarding --> CheckPermission: onResume
-    Gallery --> FullScreen: Tap Image
-    FullScreen --> Gallery: Close/Delete
+    CheckPermission --> Library: Service Enabled
+    Library --> Capture : Quick Settings Tile
+    Capture --> Preview : Success
+    Preview --> Library : Swipe/Auto-Dismiss
+    Preview --> Edit : Tap
+    Edit --> Library : Save/Delete (Finish Task)
+    Library --> FullScreen: Tap Image
+    FullScreen --> Library: Close/Delete
 ```
 
 ## Lifecycle Integration
