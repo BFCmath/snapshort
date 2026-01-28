@@ -5,6 +5,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -14,11 +15,13 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.Card
@@ -53,48 +56,121 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun GalleryScreen(
     screenshots: List<File>,
     onRefresh: () -> Unit,
-    onDelete: (File) -> Unit
+    onDelete: (List<File>) -> Unit
 ) {
-    var selectedImage by remember { mutableStateOf<File?>(null) }
+    var selectedImages by remember { mutableStateOf<Set<File>>(emptySet()) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
+    var imageForPreview by remember { mutableStateOf<File?>(null) }
+
+    val isSelectionMode = selectedImages.isNotEmpty()
+
+    fun toggleSelection(file: File) {
+        selectedImages = if (selectedImages.contains(file)) {
+            selectedImages - file
+        } else {
+            selectedImages + file
+        }
+    }
+
+    if (showDeleteDialog) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = { Text("Delete Screenshots?") },
+            text = { Text("Are you sure you want to delete ${selectedImages.size} selected screenshot(s)?") },
+            confirmButton = {
+                androidx.compose.material3.TextButton(
+                    onClick = {
+                        onDelete(selectedImages.toList())
+                        selectedImages = emptySet()
+                        showDeleteDialog = false
+                    }
+                ) {
+                    Text("Delete")
+                }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { showDeleteDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
-            TopAppBar(
-                title = { Text("SnapShort Gallery") },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
+            if (isSelectionMode) {
+                TopAppBar(
+                    title = { 
+                        Text(
+                            "${selectedImages.size} Selected",
+                            style = MaterialTheme.typography.titleLarge
+                        ) 
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        titleContentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                        actionIconContentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                        navigationIconContentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                    ),
+                    navigationIcon = {
+                        IconButton(onClick = { selectedImages = emptySet() }) {
+                            Icon(Icons.Default.Close, "Close Selection")
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = { showDeleteDialog = true }) {
+                            Icon(Icons.Default.Delete, "Delete Selected")
+                        }
+                    }
                 )
-            )
+            } else {
+                TopAppBar(
+                    title = { Text("SnapShort Gallery") },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                        titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                )
+            }
 
             if (screenshots.isEmpty()) {
                 EmptyGalleryMessage()
             } else {
                 ScreenshotGrid(
                     screenshots = screenshots,
-                    onImageClick = { selectedImage = it }
+                    selectedImages = selectedImages,
+                    onImageClick = { file ->
+                        if (isSelectionMode) {
+                            toggleSelection(file)
+                        } else {
+                            imageForPreview = file
+                        }
+                    },
+                    onImageLongClick = { file ->
+                        toggleSelection(file)
+                    }
                 )
             }
         }
 
         // Full screen viewer overlay
         AnimatedVisibility(
-            visible = selectedImage != null,
+            visible = imageForPreview != null,
             enter = fadeIn(),
             exit = fadeOut()
         ) {
-            selectedImage?.let { file ->
+            imageForPreview?.let { file ->
                 FullScreenViewer(
                     file = file,
-                    onDismiss = { selectedImage = null },
+                    onDismiss = { imageForPreview = null },
                     onDelete = {
-                        onDelete(file)
-                        selectedImage = null
+                        onDelete(listOf(file))
+                        imageForPreview = null
                     }
                 )
             }
@@ -135,7 +211,9 @@ private fun EmptyGalleryMessage() {
 @Composable
 private fun ScreenshotGrid(
     screenshots: List<File>,
-    onImageClick: (File) -> Unit
+    selectedImages: Set<File>,
+    onImageClick: (File) -> Unit,
+    onImageLongClick: (File) -> Unit
 ) {
     LazyVerticalGrid(
         columns = GridCells.Fixed(3),
@@ -147,33 +225,62 @@ private fun ScreenshotGrid(
         items(screenshots, key = { it.absolutePath }) { file ->
             ScreenshotThumbnail(
                 file = file,
-                onClick = { onImageClick(file) }
+                isSelected = selectedImages.contains(file),
+                onClick = { onImageClick(file) },
+                onLongClick = { onImageLongClick(file) }
             )
         }
     }
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun ScreenshotThumbnail(
     file: File,
-    onClick: () -> Unit
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit
 ) {
-    Card(
-        modifier = Modifier
-            .aspectRatio(1f)
-            .clickable(onClick = onClick),
-        shape = RoundedCornerShape(8.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-    ) {
-        AsyncImage(
-            model = ImageRequest.Builder(LocalContext.current)
-                .data(file)
-                .crossfade(true)
-                .build(),
-            contentDescription = "Screenshot from ${formatDate(file.lastModified())}",
-            contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxSize()
-        )
+    Box {
+        Card(
+            modifier = Modifier
+                .aspectRatio(1f)
+                .combinedClickable(
+                    onClick = onClick,
+                    onLongClick = onLongClick
+                ),
+            shape = RoundedCornerShape(8.dp),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+            border = if (isSelected) androidx.compose.foundation.BorderStroke(3.dp, MaterialTheme.colorScheme.primary) else null
+        ) {
+            Box(modifier = Modifier.fillMaxSize()) {
+                AsyncImage(
+                    model = ImageRequest.Builder(LocalContext.current)
+                        .data(file)
+                        .crossfade(true)
+                        .build(),
+                    contentDescription = "Screenshot",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+                
+                if (isSelected) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = androidx.compose.material.icons.Icons.Filled.Check,
+                            contentDescription = "Selected",
+                            tint = Color.White,
+                            modifier = Modifier.size(32.dp)
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 

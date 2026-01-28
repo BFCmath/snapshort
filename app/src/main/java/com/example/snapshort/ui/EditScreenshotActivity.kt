@@ -96,8 +96,9 @@ fun EditScreen(
     val metadataRepository = remember { MetadataRepository(context) }
     val screenshotRepository = remember { ScreenshotRepository(context) }
     
-    var name by remember { mutableStateOf("Screenshot_${System.currentTimeMillis()}") }
+    var name by remember { mutableStateOf("") }
     var dueDate by remember { mutableStateOf<Long?>(null) }
+    var description by remember { mutableStateOf("") }
     var showDatePicker by remember { mutableStateOf(false) }
     var isLoading by remember { mutableStateOf(true) }
     
@@ -223,16 +224,34 @@ fun EditScreen(
                                     croppedBitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
                                 }
                                 
+                                // Snap-to-Task Logic
+                                val hasName = name.isNotBlank()
+                                val hasDate = dueDate != null
+                                val hasDesc = description.isNotBlank()
+                                val isTask = hasName || hasDate || hasDesc
+                                
                                 val metadata = ScreenshotMetadata(
                                     id = UUID.randomUUID().toString(),
                                     fileName = file.name,
-                                    displayName = name,
+                                    displayName = if (hasName) name else null,
                                     dueDate = dueDate,
+                                    description = if (hasDesc) description else null,
                                     creationDate = System.currentTimeMillis()
                                 )
-                                metadataRepository.saveMetadata(metadata)
+                                metadataRepository.saveMetadata(metadata)                                
+
+                                if (isTask) {
+                                    // Signal Auto-Nav only if it's a real Task
+                                    context.getSharedPreferences("snapshort_prefs", Context.MODE_PRIVATE)
+                                        .edit()
+                                        .putBoolean("NAVIGATE_TO_TASKS", true)
+                                        .apply()
+                                        
+                                    Toast.makeText(context, "Saved as Task!", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    Toast.makeText(context, "Saved as Snap!", Toast.LENGTH_SHORT).show()
+                                }
                                 
-                                Toast.makeText(context, "Saved!", Toast.LENGTH_SHORT).show()
                                 isLoading = false
                                 onSave()
                             } else {
@@ -270,7 +289,8 @@ fun EditScreen(
                     OutlinedTextField(
                         value = name,
                         onValueChange = { name = it },
-                        label = { Text("Task Name") },
+                        label = { Text("Task Name (Optional)") },
+                        placeholder = { Text("Enter name or leave empty") },
                         modifier = Modifier.fillMaxWidth()
                     )
                     
@@ -298,6 +318,16 @@ fun EditScreen(
                             }
                         )
                     }
+                    
+                    Spacer(modifier = Modifier.height(8.dp))
+                    
+                    OutlinedTextField(
+                        value = description,
+                        onValueChange = { description = it },
+                        label = { Text("Description") },
+                        modifier = Modifier.fillMaxWidth(),
+                        maxLines = 3
+                    )
                 }
             }
             

@@ -18,13 +18,18 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
+import kotlinx.coroutines.launch
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -66,17 +71,47 @@ class MainActivity : ComponentActivity() {
 fun MainScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    val repository = remember { ScreenshotRepository(context) }
+    val screenshotRepo = remember { ScreenshotRepository(context) }
+    val metadataRepo = remember { com.example.snapshort.data.MetadataRepository(context) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
     
     var isAccessibilityEnabled by remember { mutableStateOf(false) }
-    var screenshots by remember { mutableStateOf<List<File>>(emptyList()) }
+    var allScreenshots by remember { mutableStateOf<List<File>>(emptyList()) }
+    var allMetadata by remember { mutableStateOf<List<com.example.snapshort.data.ScreenshotMetadata>>(emptyList()) }
     var isRefreshing by remember { mutableStateOf(false) }
+    
+    // Navigation State
+    var currentTab by remember { mutableStateOf(Tab.Snaps) }
 
-    // Check accessibility permission and refresh screenshots on resume
+    // Check accessibility and load data
     LaunchedEffect(lifecycleOwner) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             isAccessibilityEnabled = isAccessibilityServiceEnabled(context)
-            screenshots = repository.getScreenshots()
+            allScreenshots = screenshotRepo.getScreenshots()
+            allMetadata = metadataRepo.getAllMetadata()
+            
+            // Check for Auto-Nav signal
+            val prefs = context.getSharedPreferences("snapshort_prefs", Context.MODE_PRIVATE)
+            if (prefs.getBoolean("NAVIGATE_TO_TASKS", false)) {
+                currentTab = Tab.Tasks
+                prefs.edit().putBoolean("NAVIGATE_TO_TASKS", false).apply()
+            }
+        }
+    }
+
+    // Filter Logic
+    val snaps = remember(allScreenshots, allMetadata) {
+        allScreenshots.filter { file -> 
+            val meta = allMetadata.find { it.fileName == file.name }
+            // Snap if no metadata, OR if metadata has no Task fields
+            if (meta == null) true
+            else meta.displayName.isNullOrBlank() && meta.dueDate == null && meta.description.isNullOrBlank()
+        }
+    }
+    
+    val tasks = remember(allMetadata) {
+        allMetadata.filter { 
+            !it.displayName.isNullOrBlank() || it.dueDate != null || !it.description.isNullOrBlank()
         }
     }
 
@@ -88,27 +123,86 @@ fun MainScreen(modifier: Modifier = Modifier) {
                 }
             )
         } else {
-            PullToRefreshBox(
-                isRefreshing = isRefreshing,
-                onRefresh = {
-                    isRefreshing = true
-                    screenshots = repository.getScreenshots()
-                    isRefreshing = false
-                },
-                modifier = Modifier.fillMaxSize()
-            ) {
-                GalleryScreen(
-                    screenshots = screenshots,
-                    onRefresh = { screenshots = repository.getScreenshots() },
-                    onDelete = { file ->
-                        repository.deleteScreenshot(file)
-                        screenshots = repository.getScreenshots()
+            Scaffold(
+                bottomBar = {
+                    NavigationBar {
+                        NavigationBarItem(
+                            icon = { Icon(Icons.Filled.Home, contentDescription = "Snaps") },
+                            label = { Text("Snaps") },
+                            selected = currentTab == Tab.Snaps,
+                            onClick = { currentTab = Tab.Snaps }
+                        )
+                        NavigationBarItem(
+                            icon = { Icon(Icons.Filled.DateRange, contentDescription = "Tasks") },
+                            label = { Text("Tasks") },
+                            selected = currentTab == Tab.Tasks,
+                            onClick = { currentTab = Tab.Tasks }
+                        )
                     }
-                )
+                }
+            ) { innerPadding ->
+                Box(modifier = Modifier.padding(innerPadding)) {
+                    when (currentTab) {
+                        Tab.Snaps -> {
+                            PullToRefreshBox(
+                                isRefreshing = isRefreshing,
+                                onRefresh = {
+                                    isRefreshing = true
+                                    allScreenshots = screenshotRepo.getScreenshots()
+                                    scope.launch { allMetadata = metadataRepo.getAllMetadata() } // Refresh both
+                                    isRefreshing = false
+                                },
+                                modifier = Modifier.fillMaxSize()
+                            ) {
+                                GalleryScreen(
+                                    screenshots = snaps,
+                                    onRefresh = { 
+                                        allScreenshots = screenshotRepo.getScreenshots()
+                                        scope.launch { allMetadata = metadataRepo.getAllMetadata() }
+                                    },
+                                    onDelete = { files ->
+                                        files.forEach { file ->
+                                            screenshotRepo.deleteScreenshot(file)
+                                        }
+                                        allScreenshots = screenshotRepo.getScreenshots()
+                                    }
+                                )
+                            }
+                        }
+                        Tab.Tasks -> {
+                            com.example.snapshort.ui.TasksScreen(
+                                tasks = tasks,
+                                getScreenshotFile = { fileName -> 
+                                    allScreenshots.find { it.name == fileName } 
+                                },
+                                onToggleComplete = { task, isCompleted ->
+                                    scope.launch {
+                                        metadataRepo.saveMetadata(task.copy(isCompleted = isCompleted))
+                                        allMetadata = metadataRepo.getAllMetadata()
+                                    }
+                                },
+                                onTaskClick = { task ->
+                                    val intent = Intent(context, com.example.snapshort.ui.EditScreenshotActivity::class.java).apply {
+                                        // Pass image URI if file exists
+                                        val file = allScreenshots.find { it.name == task.fileName }
+                                        if (file != null) {
+                                            putExtra("IMAGE_URI", android.net.Uri.fromFile(file).toString())
+                                        }
+                                        // TODO: Pass Task ID to load existing metadata in Editor
+                                        putExtra("TASK_ID", task.id)
+                                    }
+                                    context.startActivity(intent)
+                                }
+                            )
+                        }
+                    }
+                }
             }
         }
     }
 }
+
+enum class Tab { Snaps, Tasks }
 
 @Composable
 private fun AccessibilityPermissionScreen(
